@@ -4,7 +4,7 @@ import twilio from 'twilio';
 export class TwilioService {
   public static client = twilio(config.TWILIO_SID, config.TWILIO_AUTH_TOKEN);
 
-  public static async sendSms(to: string, from: string, body: string) {
+  public static sendSms(to: string, from: string, body: string) {
     return this.client.messages.create({
       to,
       from,

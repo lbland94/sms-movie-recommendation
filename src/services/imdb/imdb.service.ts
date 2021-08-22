@@ -1,8 +1,10 @@
 import config from '@/config/config';
+import { safeUrl } from '@/utilities/utilityFunctions';
 import axios from 'axios';
 import cheerio, { CheerioAPI } from 'cheerio';
-import NodeCache from 'node-cache'
-import { ImdbListItem, ImdbWatchlistTitle } from './imdb.interfaces';
+import NodeCache from 'node-cache';
+import { IMDB } from './imdb.const';
+import { ImdbListItem, ImdbTitle, ImdbWatchlist, ListUrlType } from './imdb.types';
 
 export class ImdbService {
   // Caches for 1 day
@@ -11,8 +13,7 @@ export class ImdbService {
   /**
    * Fetches a list and returns in a standard data format
    */
-  public static async fetchList(url: string, force: boolean = false, max?: number): Promise<ImdbListItem[]> {
-    console.log('fetchList', url);
+  public static async fetchListOrig(url: string, force = false, max?: number): Promise<ImdbListItem[]> {
     // Watchlists are handled a bit differently from other lists
     const watchlistRegex = /.*?\/user\/(.*?)\/watchlist.*?/;
     const isWatchlist = watchlistRegex.test(url);
@@ -62,12 +63,14 @@ export class ImdbService {
 
       if (isWatchlist) {
         const watchlistCountText = $('.nav .lister-details').text();
-        listCount = watchlistCountRegex.test(watchlistCountText) ? +watchlistCountText.match(watchlistCountRegex)[1] :
-          listCount;
+        listCount = watchlistCountRegex.test(watchlistCountText)
+          ? +watchlistCountText.match(watchlistCountRegex)[1]
+          : listCount;
       } else {
         const listCountText = $('.nav .desc > span:first-child').text();
-        listCount = listCountRegex.test(listCountText) ? +listCountText.match(listCountRegex)[2].replace(/,/g, '') :
-          listCount;
+        listCount = listCountRegex.test(listCountText)
+          ? +listCountText.match(listCountRegex)[2].replace(/,/g, '')
+          : listCount;
       }
 
       // Check if it's a "Top 100" or "Top 200" list
@@ -89,7 +92,7 @@ export class ImdbService {
         try {
           const pageSize = 250;
           let current = items.length + 1;
-          let pagePromises = [];
+          const pagePromises = [];
           while (current < listCount) {
             const parsedPageUrl = new URL(url);
             parsedPageUrl.searchParams.set('start', `${current}`);
@@ -126,51 +129,146 @@ export class ImdbService {
    * Converts a page (parsed by cheerio) to a list
    */
   public static pageToList($: CheerioAPI, watchlist: boolean): ImdbListItem[] {
-    let items = [];
+    const items = [];
     if (watchlist) {
       // Watchlist items are stored in a variable in a script tag on the page.
       $('script').each((i, script) => {
-          const scriptText = $(script).html();
-          const regex = /IMDbReactInitialState\.push\((.*?)\);.*/m;
-          if (regex.test(scriptText)) {
-            const match = scriptText.match(regex);
-            try {
-              const parsed = JSON.parse(match[1]);
-              if (parsed && parsed.titles && Object.keys(parsed.titles).length > 0) {
-                Object.keys(parsed.titles).forEach((key: string) => {
-                  const title = parsed.titles[key] as ImdbWatchlistTitle;
-                  items.push({
-                    name: title.primary.title,
-                    year: title.primary.year[0],
-                    rating: title.ratings.rating,
-                    certification: title.metadata.certificate,
-                    runtime: title.metadata.runtime,
-                    genre: title.metadata.genres.join(', '),
-                    metascore: title.ratings.metascore,
-                    link: title.primary.href,
-                  });
-                });
-              }
-            } catch (e) {
-              console.log('error', e);
+        const scriptText = $(script).html();
+        const regex = /IMDbReactInitialState\.push\((.*?)\);.*/m;
+        if (regex.test(scriptText)) {
+          const match = scriptText.match(regex);
+          try {
+            const parsed = JSON.parse(match[1]) as ImdbWatchlist;
+            if (parsed && parsed.titles && Object.keys(parsed.titles).length > 0) {
+              Object.keys(parsed.titles).forEach((key: string) => {
+                const title = parsed.titles[key];
+                items.push(this.titleToListItem(title));
+              });
             }
+          } catch (e) {
+            console.log('error', e);
           }
+        }
       });
     } else {
       // Standard list items are rendered in the HTML source of the page.
       $('.lister-item').each((i, el) => {
+        const yearRegex = /.*?\((\d+)\)$/;
+        const yearText = $(el).find('.lister-item-year').text().trim();
         items.push({
           name: $(el).find('.lister-item-header a[href*=\\/title\\/]').text().trim(),
-          year: $(el).find('.lister-item-year').text().trim(),
+          year: yearRegex.test(yearText) ? yearText.match(yearRegex)[1] : yearText,
           rating: $(el).find('.ratings-imdb-rating strong').text().trim(),
           certification: $(el).find('.certificate').text().trim(),
           runtime: $(el).find('.runtime').text().trim(),
           genre: $(el).find('.genre').text().trim(),
           metascore: $(el).find('.ratings-metascore > .metascore').text().trim(),
-          link: $(el).find('.lister-item-header a[href*=\\/title\\/]').attr('href'),
+          link: $(el).find('.lister-item-header a[href*=\\/title\\/]').attr('href').replace(/\0/g, ''),
         });
       });
     }
     return items;
+  }
+
+  public static secondsToHoursMinutes(seconds: number) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor(seconds / 60) - hours * 60;
+    return `${hours}h${minutes}m`;
+  }
+
+  public static async fetchTitles(titles: string[]): Promise<ImdbListItem[]> {
+    if (titles.length <= 0 || titles.some((title) => !/^tt\d{7}$/.test(title))) {
+      return [];
+    }
+    try {
+      const res = await axios.get<Record<string, { title: ImdbTitle }>>(
+        `https://www.imdb.com/title/data?ids=${titles.join(',')}`,
+      );
+
+      return Object.entries(res.data).map(([k, t]) => this.titleToListItem(t.title));
+    } catch (e) {
+      // fetch failed
+    }
+    return [];
+  }
+
+  public static async fetchList(url: string, force = false, max?: number): Promise<ImdbListItem[]> {
+    const listType = this.getListType(url);
+    const parsedUrl = safeUrl(url);
+    if (!url) return [];
+    switch (listType) {
+      case 'search':
+        return await this.fetchSearchList(parsedUrl, force, max);
+      case 'watch':
+        return await this.fetchWatchlist(parsedUrl, force, max);
+      case 'standard':
+        return await this.fetchStandardList(parsedUrl, force, max);
+      default:
+        return [];
+    }
+  }
+
+  public static async fetchWatchlist(url: URL, force = false, max?: number): Promise<ImdbListItem[]> {
+    const match = url.href.match(IMDB.regex.listId.watchlist);
+    const id = (match && match[1]) || '';
+
+    const cachedVal = this.getCached(id);
+    if (cachedVal && !force) {
+      return cachedVal as ImdbListItem[];
+    }
+  }
+
+  public static async fetchSearchList(url: URL, force = false, max?: number): Promise<ImdbListItem[]> {
+    const match = url.href.match(IMDB.regex.listId.searchlist);
+    const id = (match && match[1]) || url.href.split('?')[1] || '';
+
+    const cachedVal = this.getCached(id);
+    if (cachedVal && !force) {
+      return cachedVal as ImdbListItem[];
+    }
+  }
+
+  public static async fetchStandardList(url: URL, force = false, max?: number): Promise<ImdbListItem[]> {
+    const match = url.href.match(IMDB.regex.listId.standardList);
+    const id = (match && match[1]) || '';
+
+    const cachedVal = this.getCached(id);
+    if (cachedVal && !force) {
+      return cachedVal as ImdbListItem[];
+    }
+  }
+
+  public static getCached(id: string): ImdbListItem[] | undefined {
+    if (id) {
+      return this.cache.get(id);
+    }
+    return undefined;
+  }
+
+  public static getListType(url: string): ListUrlType {
+    if (IMDB.regex.listUrl.watchlist.test(url)) {
+      return 'watch';
+    }
+    if (IMDB.regex.listUrl.searchlist.test(url)) {
+      return 'search';
+    }
+    if (IMDB.regex.listUrl.standardList.test(url)) {
+      return 'standard';
+    }
+    return '';
+  }
+
+  public static titleToListItem(title: ImdbTitle): ImdbListItem {
+    return {
+      name: title.primary.title,
+      year: title.primary.year[0],
+      rating: title.ratings.rating,
+      certification: title.metadata.certificate,
+      runtime: this.secondsToHoursMinutes(title.metadata.runtime),
+      genre: title.metadata.genres.join(', '),
+      metascore: title.ratings.metascore,
+      link: title.primary.href,
+      type: title.type,
+    };
   }
 }

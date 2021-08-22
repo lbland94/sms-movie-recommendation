@@ -4,8 +4,9 @@ import CONFIG from '@/config/config';
 // Connecting to the database
 const client = (async () => {
   try {
-    const client = new MongoClient(`mongodb://${CONFIG.DB_USER}:${CONFIG.DB_PASSWORD}@` +
-      `${CONFIG.DB_HOST}:${CONFIG.DB_PORT}/${CONFIG.DB_NAME}`);
+    const client = new MongoClient(
+      `mongodb://${CONFIG.DB_USER}:${CONFIG.DB_PASSWORD}@` + `${CONFIG.DB_HOST}:${CONFIG.DB_PORT}/${CONFIG.DB_NAME}`,
+    );
     await client.connect();
     // listen for requests
     console.log('The Conection is Ok');

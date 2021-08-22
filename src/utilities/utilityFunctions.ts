@@ -9,3 +9,12 @@ export function byteToNumber(text: string): number {
   }
   return NaN;
 }
+
+export function safeUrl(url: string): URL|undefined {
+  try {
+    return new URL(url);
+  } catch (e) {
+    // Bad url, bad
+  }
+  return undefined;
+}

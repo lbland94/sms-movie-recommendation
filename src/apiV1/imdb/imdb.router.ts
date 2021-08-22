@@ -45,4 +45,3 @@ export const imdbController = new Controller();
 
 // Fetch list
 imdbRouter.post('/list', imdbController.fetchList);
-

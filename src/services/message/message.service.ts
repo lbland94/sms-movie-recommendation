@@ -1,4 +1,4 @@
-import { ImdbListItem } from '../imdb/imdb.interfaces';
+import { ImdbListItem } from '../imdb/imdb.types';
 import { ImdbService } from '../imdb/imdb.service';
 import { TwilioService } from '../twilio/twilio.service';
 import { MessageType } from './message.interfaces';
@@ -31,10 +31,11 @@ export class MessageService {
       if (urlRegex.test(body)) {
         const url = body.match(urlRegex)[1];
         const list = await ImdbService.fetchList(url);
-        if (list && list.length > 0) {
-          const recommendation = list[Math.floor(Math.random() * list.length)];
+        const filtered = list.filter((item) => item.type && item.type === 'featureFilm');
+        if (filtered && filtered.length > 0) {
+          const recommendation = filtered[Math.floor(Math.random() * filtered.length)];
           try {
-            TwilioService.sendSms(from, to, this.recommendationToSms(recommendation));
+            await TwilioService.sendSms(from, to, this.recommendationToSms(recommendation));
           } catch (e) {
             console.log('error sending sms', e);
           }
@@ -45,10 +46,12 @@ export class MessageService {
   }
 
   public static recommendationToSms(rec: ImdbListItem): string {
-    return `${rec.name} - (${rec.year})\n` +
-    `rating: ${rec.rating}\n` +
-    `runtime: ${rec.runtime}\n` +
-    `genre: ${rec.genre}\n` +
-    `https://imdb.com${rec.link}`;
+    return (
+      `${rec.name} - (${rec.year})\n` +
+      `rating: ${rec.rating}\n` +
+      `runtime: ${rec.runtime}\n` +
+      `genre: ${rec.genre}\n` +
+      `https://imdb.com${rec.link}`
+    );
   }
 }

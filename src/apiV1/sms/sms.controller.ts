@@ -6,8 +6,7 @@ import { OK } from 'http-status';
 import twilio from 'twilio';
 
 export default class SmsController {
-  public async incomingMessage(req: Request<any, any, MessagingWebhookBody, any>,
-                               res: Response): Promise<any> {
+  public async incomingMessage(req: Request<any, any, MessagingWebhookBody, any>, res: Response): Promise<any> {
     const request = req.body;
     const textResponse = await MessageService.handleSms(request.Body, request.From, request.To);
 
@@ -19,8 +18,7 @@ export default class SmsController {
     res.send(response.toString());
   }
 
-  public async messageStatusUpdate(req: Request<any, any, MessageStatusWebhookBody, any>,
-                                   res: Response): Promise<any> {
+  public async messageStatusUpdate(req: Request<any, any, MessageStatusWebhookBody, any>, res: Response): Promise<any> {
     const request = req.body;
 
     if (request.MessageStatus === 'delivered') {
