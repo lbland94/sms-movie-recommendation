@@ -16,7 +16,7 @@ export default {
   TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || 'twilioAuthToken',
   TWILIO_NUMBER: process.env.TWILIO_NUMBER || '+15555555555',
 
-  BASE_URL: process.env.BASE_URL || 'http://localhost:3000',
+  BASE_URL: process.env.BASE_URL || 'http://localhost:3001',
 
   IMDB_CACHE_MAX: process.env.IMDB_CACHE_MAX || 100,
 };
